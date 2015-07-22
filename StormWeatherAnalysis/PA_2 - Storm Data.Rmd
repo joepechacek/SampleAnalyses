@@ -1,0 +1,518 @@
+---
+title: "The Economic and Public Health Impact of Severe Weather Events"
+author: "Joe Pechacek"
+date: "June 17, 2015"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+## Synopsis
+The purpose of this analysis is to provide a high-level look at both the Economic 
+consequences and Public Health impacts resulting from severe weather events.  The
+data for this analysis comes from the U.S. National Oceanic and Atmospheric 
+Administration (NOAA) storm database.  The Economic consequences for this analysis is 
+measured in terms of Millions of Dollars of damage to both Property and Crops.
+The impact on Public Health is a measure of Injuries and Fatalities as a result 
+of severe weather events.  We will look at each impact group independently, though
+there is an expectation that certain events will contribute to great loss in both 
+Economic and Public Health measures such as Tornadoes or Flooding.
+
+## Data Processing
+The data for this analysis was provided through the Reproducible Research course 
+website presented by Johns Hopkins University on Coursera.  The data can be 
+downloaded at the following link:
+
+ 
+[Storm Data](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2)  
+
+
+The raw data encompasses a range of observations from 1950 through November 2011 and 
+represents a rather wide range of details over the 60 plus year period.  Prior to
+January 1996 the data had no standardized format and event details appear to be 
+at the discretion of the event report author.  Starting in 1996 there was an effort to 
+improve the standardization of the data fields and variables as well as include a 
+wider range of weather events.  Prior to 1996, the storm database consisted mostly 
+of Tornadoes, Thunderstorms, Wind and Hail events.  Starting in 1996 the database 
+recorded 48 standardized event types including events such as Hurricanes, Floods 
+and Wildfires.  See the [NOAA Storm Events Database Details](http://www.ncdc.noaa.gov/stormevents/details.jsp)
+for reference.
+
+Given that 45 years of the database was limited to a small segment of severe weather
+event types, it was deemed that a bias would exist for certain event types. For this
+reason, the analysis focused on the more than 15 year segment since 1996 when a 
+wider range of events were recorded. Using this subset of the database helps ensure
+each event recorded since 1996 is represented in the database more equally and will
+then reduce the impact of this bias.
+
+### Loading and Preparation
+
+Prior to conducting the analysis, the following steps were followed to load the
+database into R and process the raw data to include the key data points for this 
+analysis.  The raw data file for this analysis is compressed using BZ2 and should 
+be saved to the current working directory of the R session.  To find the current 
+working directory you can call the function `getwd()`.
+
+Throughout the analysis there are a series of R packages used to make data analysis
+run more smoothly and easily.  Prior to any data processing, the following packages 
+should be loaded.
+
+* knitr
+* dplyr
+* lubridate
+* ggplot2
+* tidyr
+
+If you do not have these packages available on your local machine, they
+should be installed first through [CRAN](cran.r-project.org) or a similar source.
+
+```{r Load Packages}
+require(knitr)
+require(dplyr)
+require(lubridate)
+require(ggplot2)
+require(tidyr)
+```
+
+With the required packages loaded, we first need to load the data using the `read.csv()` 
+function.  It is fortunate that the `read.csv()` function already recognizes BZ2 
+files, so the data can be read in directly.  This imported data will be stored to
+a variable named "dataMaster" in order to keep an untouched version of the raw data
+that can be called anytime for further analysis.
+
+```{r Read Data}
+dataMaster <- tbl_df(read.csv("repdata-data-StormData.csv.bz2", stringsAsFactors = FALSE))
+```
+
+Since the focus of this analysis is on severe weather events, a variable named "EVTYPE" 
+is going to be of great interest.  There are 48 standard EVTYPEs defined by NOAA 
+that should be used to ensure consistency.  To ensure we maintain this consistency
+during this analysis, the EVTYPE variables will all be changed to Upper Case to 
+reduce the potential of mis-matched case and a list of the NOAA standard event 
+types is created for use later.
+
+```{r EVTYPE}
+dataMaster$EVTYPE <- toupper(dataMaster$EVTYPE)
+StdEventNames <- toupper(c("Astronomical Low Tide", "Avalanche", "Blizzard", "Coastal Flood",
+                           "Cold/Wind Chill", "Debris Flow", "Dense Fog", "Dense Smoke", 
+                           "Drought", "Dust Devil", "Dust Storm", "Excessive Heat",
+                           "Extreme Cold/Wind Chill", "Flash Flood", "Flood", "Frost/Freeze",
+                           "Funnel Cloud", "Freezing Fog", "Hail", "Heat", "Heavy Rain", 
+                           "Heavy Snow", "High Surf", "High Wind", "Hurricane (Typhoon)",
+                           "Ice Storm", "Lake-Effect Snow", "Lakeshore Flood", "Lightning",
+                           "Marine Hail", "Marine High Wind", "Marine Strong Wind", 
+                           "Marine Thunderstorm Wind", "Rip Current", "Seiche", "Sleet",
+                           "Storm Surge/Tide", "Strong Wind", "Thunderstorm Wind", "Tornado",
+                           "Tropical Depression", "Tropical Storm", "Tsunami", "Volcanic Ash",
+                           "Waterspout", "Wildfire", "Winter Storm", "Winter Weather"))
+```
+
+The next step in the data preparation is to parse down the raw data to only those 
+items that are of interest to our analysis. This will be placed into an object 
+called "data" in order to preserve the "dataMaster" object created previously.  The 
+following code segments will select those data points from 1996 to current; only 
+those items that have an impact on Public Health (FATALITIES & INJURIES not equal 
+to 0) and items that impact Economic consequences (PROPDMG & CROPDMG not equal to 0).
+We should also change the PROPDMGEXP and CROPDMGEXP variables to class 'factor' 
+as they represent a form of multiplier to be used for the values contained in the 
+variables PROPDMG and CROPDMG.
+
+```{r Parse Data}
+data <- dataMaster %>%
+     mutate(YEAR = year(mdy_hms(dataMaster$BGN_DATE))) %>%
+     filter(YEAR > 1996)
+
+data <- data[with(data, INJURIES != 0 | 
+                          FATALITIES != 0 | 
+                          PROPDMG != 0 | 
+                          CROPDMG != 0), ]
+
+data$PROPDMGEXP <- as.factor(data$PROPDMGEXP)
+data$CROPDMGEXP <- as.factor(data$CROPDMGEXP)
+```
+
+This completes the loading and preparation of the data that can now be used for the
+two areas of our analysis - impact on Public Health and impact on Economic consequences.
+The final data frame object "data" will be the main data frame that will feed into
+the follow up analysis.
+
+#### Impact on Public Health
+
+The first area of the analysis looked at is the impact on Public Health.  This 
+impact can be assessed by using two variables, FATALITIES and INJURIES, and then
+looking for patterns that will describe which severe weather events have the 
+greatest impact.  This high-level look at which events have the greatest impact 
+will simply determine the severe weather event type (EVTYPE) that has the greatest
+number of FATALITIES and INJURIES combined.  The following code segments will 
+step through the process followed for this analysis:
+
+First we will create a subset of the data that only includes FATALITIES and 
+INJURIES, create a new variable called FATAL_INJURED to show the combined total
+of fatalities and injuries, then select only those variables that may be needed
+for this analysis such as Year, State, County, Event Type along with the fatality
+and injury variables.
+
+```{r Health Data}
+dataHealth <- data[with(data, INJURIES != 0 |
+                             FATALITIES != 0), ]
+
+dataHealth <- dataHealth %>%
+     mutate(FATAL_INJURED = (FATALITIES + INJURIES)) %>%
+     select(YEAR, STATE, COUNTYNAME, EVTYPE, FATALITIES, INJURIES, FATAL_INJURED)
+```
+
+Now that we have a subset just for the Public Health variables, we need to
+standardize the event types (EVTYPE) to use the standard event types.  This will
+be a two steps process as there are going to be certain events in the database
+that will not follow the standard and must be corrected.  The first step is to 
+identify all the EVTYPE variables that match one of the 48 standard types, and then a
+strategy for assigning the remaining unmatched event types can be applied.  First
+we need to match those that are already using the standard by identifying in a 
+variable StdEVTYPE the standard event type that matches. Those that do not have 
+a match will be set to NA.
+
+```{r Match EVTYPE}
+dataHealth <- dataHealth %>%
+     mutate(StdEVTYPE = ifelse(EVTYPE %in% StdEventNames,
+                               EVTYPE,
+                               NA))
+```
+
+Upon inspection of the data during this analysis, it was found that there are
+close to 80 event types that did not have a match to the 48 standard types.
+Rather than correct all unmatched items, I looked at the impact these unmatched
+items have on fatality and injury counts.  The strategy employed to correct these
+unmatched events is that if a particular unmatched event had a small impact 
+(for example, less than 10 fatalities or injuries), then it would not contribute
+a great deal to the overall counts.  The following code was used to determine which
+of the unmatched event types would have a large impact to this analysis by looking 
+at a sample of 20 unmatched events that showed the largest count of fatalities 
+and injuries.
+
+```{r Unmatched Impact}
+dataHealthTmp <- dataHealth %>%
+     group_by(EVTYPE) %>%
+     filter(is.na(StdEVTYPE)) %>%
+     summarize(FATAL_INJURED = sum(FATAL_INJURED),
+               FATALITIES = sum(FATALITIES),
+               INJURIES = sum(INJURIES)) %>%
+     arrange(desc(FATAL_INJURED))
+
+head(as.data.frame(dataHealthTmp),20)
+
+```
+
+By inspection of this list, it can be seen that there are some unmatched events 
+that had a large number of fatalities and injuries.  It can also be noted that 
+this count drops quickly with item #20 "COLD"" having a count of only 27 
+fatalities/injuries as compared to over 3,500 for item #1.  Based on this 
+observation, I chose to only focus on matching those events that contribute more
+than 50 total fatalities and injuries (items 1 - 16).  In order to match these
+remaining event types, I first created a list of unmatched items and then used a 
+series of `grep()` functions to assign the best match.  There will be additional
+unmatched items that may match based on the `grep()` character string used, 
+however these additional items are considered to be of minimal impact to the
+scope based on the magnitude of the values.
+
+```{r Match Unmatched}
+EV_NAs <- data.frame(EVTYPE = unique(dataHealth$EVTYPE[is.na(dataHealth$StdEVTYPE)]),
+                     stringsAsFactors = FALSE)
+EV_NAs$StdEVTYPE <- NA
+
+EV_NAs[grep("WIND", EV_NAs$EVTYPE), 2] <- "HIGH WIND"
+EV_NAs[grep("FOG", EV_NAs$EVTYPE), 2] <- "DENSE FOG"
+EV_NAs[grep("COLD", EV_NAs$EVTYPE), 2] <- "EXTREME COLD/WIND CHILL"
+EV_NAs[grep("WINTER WEATHER", EV_NAs$EVTYPE), 2] <- "WINTER WEATHER"
+EV_NAs[grep("WINTRY MIX", EV_NAs$EVTYPE), 2] <- "WINTER WEATHER"
+EV_NAs[grep("TSTM", EV_NAs$EVTYPE), 2] <- "THUNDERSTORM WIND"
+EV_NAs[grep("HURRICANE", EV_NAs$EVTYPE), 2] <- "HURRICANE (TYPHOON)"
+EV_NAs[grep("FIRE", EV_NAs$EVTYPE), 2] <- "WILDFIRE"
+EV_NAs[grep("GLAZE", EV_NAs$EVTYPE), 2] <- "WINTER WEATHER"
+EV_NAs[grep("RIP", EV_NAs$EVTYPE), 2] <- "RIP CURRENT"
+EV_NAs[grep("SURF", EV_NAs$EVTYPE), 2] <- "HIGH SURF"
+EV_NAs[grep("LANDSLIDE", EV_NAs$EVTYPE), 2] <- "DEBRIS FLOW"
+EV_NAs[grep("STREAM FLD", EV_NAs$EVTYPE), 2] <- "FLOOD"
+```
+
+With the list of updated EVTYPEs assigned to one of the 48 standard types, we can
+now merge this list with our current data object.  The `left_join()` process will 
+combine the data and create two new variables that will need to be combined into
+a single variable StdEVTYPE.
+```{r Join Data}
+dataHealth <- left_join(dataHealth, EV_NAs, by = "EVTYPE")
+
+dataHealth <- dataHealth %>%
+     mutate(StdEVTYPE = ifelse(is.na(dataHealth$StdEVTYPE.x),
+                                  dataHealth$StdEVTYPE.y,
+                                  dataHealth$StdEVTYPE.x)) %>%
+     select(-StdEVTYPE.x, -StdEVTYPE.y)
+```
+
+With this updated data object that now includes updates to use the 48 standard 
+event types for events with a greater impact, we can focus on performing the 
+analysis to answer the question
+**"Across the United States, which types of events are most harmful with respect to population health?"** 
+The first step I took was to exclude the remaining event types that were not 
+matched earlier.  With this resulting data set, I sorted the data based on the
+greatest number of Fatalities and Injuries combined. This is then used to create
+a plotting data set that only includes the 10 events with the greatest impact to 
+Public Health.  This plotting data set is converted to a long format using 
+`gather()` to aid in the plotting function that will create separate colors for
+Fatalities and Injuries.
+
+```{r Plot Data 1}
+DH_Analysis <- dataHealth %>%
+     group_by(StdEVTYPE) %>%
+     filter(!is.na(StdEVTYPE)) %>%
+     summarize(FATAL_INJURED = sum(FATAL_INJURED),
+               FATALITIES = sum(FATALITIES),
+               INJURIES = sum(INJURIES)) %>%
+     arrange(desc(FATAL_INJURED))
+
+DH_plot_1 <- DH_Analysis[1:10,]
+DH_plot_1 <- DH_plot_1 %>%
+     select(StdEVTYPE, FATALITIES, INJURIES) %>%
+     gather(Measurement, Value, -StdEVTYPE) %>%
+     group_by(Measurement)
+```
+
+Using the resulting data, we can generate a plot using the `ggplot2` package.
+The results of this plot will be discussed further in the **Results** section 
+later in this report.
+
+```{r Plot 1}
+p1 <- ggplot(DH_plot_1, aes(x = reorder(StdEVTYPE, Value, function(x)max(x)),
+                            y = Value, fill = Measurement)) +
+     geom_bar(stat = "identity") +
+     coord_flip() +
+     labs(title = "Event Types with Greatest Overall Impact on Public Health since 1996",
+          x = "Event Type",
+          y = "Number of Fatalities and Injuries")
+```
+
+
+#### Impact on Economic Factors
+
+This area of the analysis focuses on the Economic consequences of severe weather.
+This impact will be focused on two key variables CROPDMG and PROPDMG along
+with their requisite scalars CROPDMGEXP and PROPDMGEXP.  
+
+Most of the processing flows used here are similar to those previously used in 
+the Public Health analysis, so descriptions of each step will be less detailed, 
+however key variables and decisions made will be of equal detail as used in the 
+Public Health analysis.
+
+As we did in the Public Health analysis, we will create a new data object that is
+now going to be focused on the CROPDMG and PROPDMG variables, then the process to 
+match the EVTYPE to one of the 48 standard event types is completed.
+
+```{r Econ Data}
+dataEcon <- data[with(data, PROPDMG != 0 |
+                             CROPDMG != 0), ]
+
+dataEcon <- dataEcon %>%
+     mutate(StdEVTYPE = ifelse(EVTYPE %in% StdEventNames,
+                               EVTYPE,
+                               NA))
+
+```
+
+The next step in the analysis is to determine which of the unmatched events
+have a significant impact on the overall analysis.  This will follow a similar
+process as used previously with Public Health, however the variables in this 
+case are in terms of damage costs in Dollars.  Before we can run any comparisons
+of damage costs, we must first put all damage costs into the same unit of measure.
+The database makes use of the scalar variables CROPDMGEXP and PROPDMGEXP for the 
+cost of damages.  This scalar is signified by "K" = "Thousand", "M" = "Million" 
+or "B" = "Billion".  In order to compare the impact of each event, the total 
+dollar amount for the CROPDMG and PROPDMG variables needs to be calculated.  
+
+The first step in this process is to update the CROPDMGEXP and PRODMGEXP variables
+to be numeric representations of the scale factors.  Given the magnitude of the 
+values, I have adjusted the multiplier to result in an outcome of Millions 
+(i.e. Billion = 1000, Thousand = 0.001).
+
+With these scale factors in a numeric format, a new variable can be created that 
+shows the total impact in Millions of Dollars.  After this conversion of total
+Dollar impact is completed, the scale factor variables are not needed and removed
+from the data set.
+```{r Dollar Scale}
+dataEcon$PROPDMGEXP <- sub("K", 0.001, dataEcon$PROPDMGEXP)
+dataEcon$PROPDMGEXP <- sub("M", 1, dataEcon$PROPDMGEXP)
+dataEcon$PROPDMGEXP <- sub("B", 1000, dataEcon$PROPDMGEXP)
+dataEcon$PROPDMGEXP <- sub("", 0, dataEcon$PROPDMGEXP)
+dataEcon$CROPDMGEXP <- sub("K", .001, dataEcon$CROPDMGEXP)
+dataEcon$CROPDMGEXP <- sub("M", 1, dataEcon$CROPDMGEXP)
+dataEcon$CROPDMGEXP <- sub("B", 1000, dataEcon$CROPDMGEXP)
+dataEcon$CROPDMGEXP <- sub("", 0, dataEcon$CROPDMGEXP)
+
+class(dataEcon$PROPDMGEXP) <- "numeric"
+class(dataEcon$CROPDMGEXP) <- "numeric"
+
+
+dataEcon <- dataEcon %>%
+     mutate(PROPDMG_M = PROPDMG * PROPDMGEXP, 
+            CROPDMG_M = CROPDMG * CROPDMGEXP,
+            TOTALDMG_M = CROPDMG_M + PROPDMG_M) %>%
+     select(-CROPDMGEXP, -PROPDMGEXP, -PROPDMG, -CROPDMG)
+```
+
+With a total damage amount for each event in a common unit of measure, the next
+step is to go through the matching process.  We will use the same method of 
+identifying the unmatched event types with the greatest impact and then update a
+list of unmatched events to be merged later. From the resulting list below, a 
+determination can be made on which unmatched event types should be considered as 
+significant.  In this case, we can once again see that there is a quick decline 
+in the values associated with unmatched events and I chose events with over $50 
+Million in damage as being significant for this analysis.  Based on this threshold, 
+I used `grep()` to match select event types to one of the 48 standard types. As before
+it is expected that some lesser events may also be updated based on the `grep()` 
+character string used and this was considered acceptable.
+
+``` {r Unmatched Events}
+dataEconTmp <- dataEcon %>%
+     group_by(EVTYPE) %>%
+     filter(is.na(StdEVTYPE)) %>%
+     summarize(PROPDMG_M = sum(PROPDMG_M),
+               CROPDMG_M = sum(CROPDMG_M),
+               TOTALDMG_M = sum(TOTALDMG_M)) %>%
+     arrange(desc(TOTALDMG_M))
+
+head(as.data.frame(dataEconTmp),20)
+
+
+EV_NAs <- data.frame(EVTYPE = unique(dataEcon$EVTYPE[is.na(dataEcon$StdEVTYPE)]),
+                     stringsAsFactors = FALSE)
+EV_NAs$StdEVTYPE <- NA
+
+
+EV_NAs[grep("HURRICANE", EV_NAs$EVTYPE), 2] <- "HURRICANE (TYPHOON)"
+EV_NAs[grep("TSTM", EV_NAs$EVTYPE), 2] <-  "THUNDERSTORM WIND"
+EV_NAs[grep("SURGE", EV_NAs$EVTYPE), 2] <-  "STORM SURGE/TIDE"
+EV_NAs[grep("FIRE", EV_NAs$EVTYPE), 2] <-  "WILDFIRE"
+EV_NAs[grep("COLD", EV_NAs$EVTYPE), 2] <-  "EXTREME COLD/WIND CHILL"
+EV_NAs[grep("TYPHOON", EV_NAs$EVTYPE), 2] <- "HURRICANE (TYPHOON)"
+EV_NAs[grep("LANDSLIDE", EV_NAs$EVTYPE), 2] <-  "DEBRIS FLOW"
+EV_NAs[grep("FREEZE", EV_NAs$EVTYPE), 2] <-  "FROST/FREEZE"
+EV_NAs[grep("COASTAL FLOODING", EV_NAs$EVTYPE), 2] <-  "COASTAL FLOOD"
+EV_NAs[grep("STREAM FLD", EV_NAs$EVTYPE), 2] <-  "FLOOD"
+EV_NAs[grep("FLOOD", EV_NAs$EVTYPE), 2] <- "FLOOD"
+EV_NAs[grep("HAIL", EV_NAs$EVTYPE), 2] <-  "HAIL"
+```
+
+Now that we have updated event types, the final steps in this analysis are to
+merge the data to include these updates; create an analysis data set sorted on
+events with the highest damage cost; then prepare a plotting data set in a
+long format using `gather()` to include the 10 events with the highest total 
+damage costs.
+
+```{r Join Plot Data 2}
+dataEcon <- left_join(dataEcon, EV_NAs, by = "EVTYPE")
+
+dataEcon <- dataEcon %>%
+     mutate(StdEVTYPE = ifelse(is.na(dataEcon$StdEVTYPE.x),
+                                  dataEcon$StdEVTYPE.y,
+                                  dataEcon$StdEVTYPE.x)) %>%
+     select(-StdEVTYPE.x, -StdEVTYPE.y)
+
+
+DE_Analysis <- dataEcon %>%
+     group_by(StdEVTYPE) %>%
+     filter(!is.na(StdEVTYPE)) %>%
+     summarize(TOTALDMG_M = sum(TOTALDMG_M),
+               PROPDMG_M = sum(PROPDMG_M),
+               CROPDMG_M = sum(CROPDMG_M)) %>%
+     arrange(desc(TOTALDMG_M))
+
+DE_plot_1 <- DE_Analysis[1:10,]
+DE_plot_1 <- DE_plot_1 %>%
+     select(StdEVTYPE, CROPDMG_M, PROPDMG_M) %>%
+     gather(Measurement, Value, -StdEVTYPE) %>%
+     group_by(Measurement)
+```
+
+With this plotting data set completed, we can generate a plot that helps to answer the
+question: 
+**"Across the United States, which types of events have the greatest economic consequences?"**  Again the `ggplot2` package is used for this.
+
+```{r Plot 2}
+p2 <- ggplot(DE_plot_1, aes(x = reorder(StdEVTYPE, Value, function(x)max(x)),
+                            y = Value, fill = Measurement)) +
+     geom_bar(stat = "identity") +
+     coord_flip() +
+     labs(title = "Event Types with Greatest Overall Economic Consequences since 1996",
+          x = "Event Type",
+          y = "Millions of Dollars in Damage")
+```
+
+
+## Results
+
+These two analyzes addressed two rather high-level questions about total impact
+across the United States for either Public Health or Economic consequences.  Based
+on this high-level analysis, further analysis in specific areas may be considered
+to address more specific questions or to focus on specific relationships.  For 
+example, the impact of Tornadoes may be seen in a variety of states, but there are
+certain states in the Midwest that are most likely to have Tornadoes.  Additionally,
+Hurricanes are going to be focused on coastal areas, so a more detailed analysis 
+of areas most impacted could be another consideration.  This analysis made no 
+attempt to go beyond the initial scope of identifying events with the greatest 
+impact across the United States, hence the following results are based on this 
+high-level view.  
+
+#### Public Health impact
+
+With respect to Public Health, the following chart shows that Tornadoes are by far
+the greatest contributor to a combined count of injuries and fatalities. The events
+with the next highest impact are less than half that of Tornadoes.
+
+```{r Print Plot 1}
+print(p1)
+```
+
+The relationship between fatalities and injuries should also be considered as
+it is clear that injuries are of the greatest impact.  Also note that the total 
+impact of both fatalities and injuries for the 10th highest event type (High Wind)
+is nearly the same or less than fatalities for Tornadoes and Excessive Heat events.
+This relationship provides validation that the results identified those events with 
+the highest counts in fatalities and injuries as there are events with higher counts in 
+one aspect (fatalities) than the total count of fatalities and injuries seen in other
+lower ranked events. 
+
+#### Economic Consequences
+
+With respect to Economic consequences, the following chart shows that Flood 
+is by far the greatest impact to combined damage costs.  Again we can see that
+the #2 ranked event Hurricane (Typhoon) is almost half the impact as #1 Flood.
+
+```{r Print Plot 2}
+print(p2)
+```
+
+Also note that the Crop damage is low for all types except Drought which may be
+expected.  The fact that Drought is one of the events in this list provides 
+further validation of the results as it provides an event with high damage costs
+in one aspect (Crops) that is greater than the total damage costs for some lower 
+ranked events.
+
+### Summary
+
+By comparison of the two charts presented above, it can be seen that Flood 
+presents a great impact on both Public Health and Economic consequences as it
+ranks #1 or #2 in each analysis.  It is also interesting to note that the following
+`r length(intersect(DH_plot_1$StdEVTYPE, DE_plot_1$StdEVTYPE))` 
+event types are included in the Top 10 for both lists.
+
+```{r Intersect EVTYPE}
+intersect(DH_plot_1$StdEVTYPE, DE_plot_1$StdEVTYPE)
+```
+
+Further analysis may be warranted for the event types identified during this 
+analysis, and in particular the 
+`r length(intersect(DH_plot_1$StdEVTYPE, DE_plot_1$StdEVTYPE))`
+events that fall into the Top 10 of both analyses. Conducting further analysis may 
+provide more details on any trends and/or impacts based on other factors such 
+as geographic location (Coastal versus Inland) or possibly if there are connections
+to population density (Metropolitan versus Rural).  This analysis was not designed 
+nor intended to provide this level of detail.
